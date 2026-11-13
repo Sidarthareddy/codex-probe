@@ -26,7 +26,7 @@ One call from session `2026-11-13T15-28-24_71bb`:
   as two messages with role `developer` (about 17,700 and 2,900 characters),
   followed by two `user` messages: an `<environment_context>` block and the
   task prompt.
-* `tools`: 9 entries. Six plain functions (`exec_command`, `write_stdin`,
+* `tools`: 9 entries. Seven plain functions (`exec_command`, `write_stdin`,
   `request_user_input`, `view_image`, `get_goal`, `create_goal`,
   `update_goal`), one `namespace` tool (`multi_agent_v1`) and one built in
   `web_search` tool.
@@ -82,7 +82,7 @@ Responses to Chat adapter would not fix it.
 
 | call | input tokens | output tokens | latency | first chunk |
 |-----:|-------------:|--------------:|--------:|------------:|
-| 0    | 4,008        | 23            | 7.8 s   | see log     |
+| 0    | 4,008        | 23            | 7.8 s   | 7.0 s       |
 
 API cost is $0 (local model). Most of the latency is Ollama reading the
 4,008 token prompt, not generating the 23 output tokens.
