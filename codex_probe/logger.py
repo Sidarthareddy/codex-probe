@@ -31,7 +31,7 @@ SECRET_HEADERS = {
 REDACTED = "[REDACTED]"
 
 # Headers a client may use to identify its own session or conversation.
-CLIENT_SESSION_HEADERS = ("session_id", "conversation_id", "x-session-id", "x-conversation-id")
+CLIENT_SESSION_HEADERS = ("session-id", "session_id", "thread-id", "conversation_id", "x-session-id")
 
 
 # --- log schema ---------------------------------------------------------------

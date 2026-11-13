@@ -15,3 +15,7 @@ dist/
 
 # macOS
 .DS_Store
+
+# Local run folders
+.codex_home/
+demo_workspace/

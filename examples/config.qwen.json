@@ -4,7 +4,7 @@
   "backend": {
     "name": "ollama_qwen",
     "base_url": "http://localhost:11434/v1",
-    "wire_api": "chat",
+    "wire_api": "responses",
     "api_key_env": null
   },
   "log_dir": "logs",
