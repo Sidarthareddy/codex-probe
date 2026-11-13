@@ -1,0 +1,13 @@
+{
+  "listen_host": "127.0.0.1",
+  "listen_port": 8135,
+  "backend": {
+    "name": "ollama_qwen",
+    "base_url": "http://localhost:11434/v1",
+    "wire_api": "chat",
+    "api_key_env": null
+  },
+  "log_dir": "logs",
+  "pricing_file": "pricing.json",
+  "seed": 0
+}
