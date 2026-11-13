@@ -198,7 +198,12 @@ def build_summary(session_id: str, calls: list[dict]) -> dict:
     for call in calls:
         usage = call["usage"] or {}
         output_tokens = usage.get("output_tokens")
-        seconds = call["latency_ms"] / 1000
+        # Generation speed: output tokens divided by the time spent streaming
+        # them (from the first chunk to the end). The wait before the first
+        # chunk is the model reading the prompt, so it is left out.
+        streamed = bool(call["response"] and call["response"]["streamed"])
+        first_chunk = call["first_chunk_ms"] or 0
+        seconds = (call["latency_ms"] - first_chunk) / 1000
         per_call.append(
             {
                 "call_index": call["call_index"],
@@ -210,8 +215,9 @@ def build_summary(session_id: str, calls: list[dict]) -> dict:
                 "latency_ms": call["latency_ms"],
                 "first_chunk_ms": call["first_chunk_ms"],
                 # Speed matters most for local models, where cost is zero.
+                # Only for streamed responses: a one piece response has nothing to time.
                 "output_tokens_per_second": round(output_tokens / seconds, 2)
-                if output_tokens is not None and seconds > 0
+                if output_tokens is not None and seconds > 0 and streamed
                 else None,
                 "cost_usd": call["cost_usd"],
                 "error": call["error"],

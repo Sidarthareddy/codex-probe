@@ -142,3 +142,15 @@ def test_summary_notes_models_without_a_price(backend, make_recorder, pricing_fi
     assert recorder.summary["calls_missing_price"] == [0]
     assert recorder.summary["total_input_tokens"] == 12   # tokens still counted
     assert "No price entry" in recorder.summary["notes"][0]
+
+
+def test_tokens_per_second_only_for_streamed_calls(backend, make_recorder, pricing_file):
+    recorder = make_recorder(pricing_file=pricing_file)
+    endpoint = recorder.start()
+    httpx.post(endpoint + "/responses", content=b'{"model":"gpt-test","stream":true}', headers=HEADERS)
+    httpx.post(endpoint + "/responses", content=b'{"model":"gpt-test"}', headers=HEADERS)
+    recorder.stop()
+
+    streamed, plain = recorder.summary["per_call"]
+    assert streamed["output_tokens_per_second"] > 0
+    assert plain["output_tokens_per_second"] is None

@@ -1,0 +1,36 @@
+{
+  "session_id": "2026-11-13T15-28-24_71bb",
+  "backends": [
+    "ollama_qwen"
+  ],
+  "models": [
+    "qwen2.5-coder:7b"
+  ],
+  "num_calls": 1,
+  "num_errors": 0,
+  "total_input_tokens": 4008,
+  "total_cached_input_tokens": 0,
+  "total_output_tokens": 23,
+  "total_reasoning_tokens": 0,
+  "total_cost_usd": 0.0,
+  "total_latency_ms": 7776,
+  "average_latency_ms": 7776,
+  "calls_missing_usage": [],
+  "calls_missing_price": [],
+  "notes": [],
+  "per_call": [
+    {
+      "call_index": 0,
+      "model": "qwen2.5-coder:7b",
+      "status": 200,
+      "input_tokens": 4008,
+      "cached_input_tokens": 0,
+      "output_tokens": 23,
+      "latency_ms": 7776,
+      "first_chunk_ms": 7019,
+      "output_tokens_per_second": 30.38,
+      "cost_usd": 0.0,
+      "error": null
+    }
+  ]
+}
