@@ -1,0 +1,10 @@
+{
+  "currency": "USD",
+  "unit": "per 1M tokens",
+  "checked_on": "2026-11-13",
+  "note": "Local models cost nothing in API fees, so they are listed with zeros. OpenAI prices get added (with the date checked) before the OpenAI run.",
+  "models": {
+    "qwen2.5-coder:7b": {"input": 0, "cached_input": 0, "output": 0},
+    "qwen2.5-coder:14b": {"input": 0, "cached_input": 0, "output": 0}
+  }
+}

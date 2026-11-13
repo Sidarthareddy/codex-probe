@@ -1,12 +1,13 @@
-"""Forward one request to the real backend and relay the answer.
+"""Forward one request to the real backend and relay the answer live.
 
 This is the passthrough path. The rules:
   * the request body is sent on exactly as received (same bytes)
-  * the response body is sent back exactly as received (same bytes)
-  * a record of the call is saved to the session
+  * the response is relayed chunk by chunk, as it arrives (same bytes)
+  * a copy of the chunks is kept, and after the response ends the full
+    call is written to the session log
 
-Streaming (SSE) relay is added in the next milestone. This version waits for
-the whole response before relaying it.
+Usage and cost are computed from the logged copy only. Nothing here changes
+what Codex or the backend sees.
 """
 
 from __future__ import annotations
@@ -16,13 +17,26 @@ import json
 import os
 import time
 import zlib
+from typing import Optional
 
 import httpx
 from fastapi import Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .config import ProbeConfig
-from .logger import Session, now_iso, redact_headers
+from .logger import (
+    BackendInfo,
+    CallRecord,
+    RequestLog,
+    ResponseLog,
+    Session,
+    find_client_session_id,
+    now_iso,
+    redact_headers,
+)
+from .pricing import compute_cost
+from .reassembly import reassemble
+from .usage import extract_usage
 
 # "Hop by hop" headers describe one single network connection (for example
 # "keep this socket open"). They are not meant to be passed along by a proxy.
@@ -42,9 +56,6 @@ HOP_BY_HOP = {
 #   host           -> must name the backend, not the proxy. httpx sets it.
 #   content-length -> httpx recomputes it from the body (same value).
 SKIP_REQUEST_HEADERS = HOP_BY_HOP | {"host", "content-length"}
-
-# Not copied back to Codex: the web server computes the length itself.
-SKIP_RESPONSE_HEADERS = HOP_BY_HOP | {"content-length"}
 
 
 def build_upstream_headers(incoming, config: ProbeConfig) -> list[tuple[str, str]]:
@@ -85,23 +96,27 @@ def build_upstream_url(config: ProbeConfig, path: str, query: str) -> str:
     return url
 
 
-def decode_body_for_log(raw: bytes, content_encoding: str = ""):
-    """Turn raw body bytes into something readable for the log.
+def decompress_for_log(raw: bytes, content_encoding: str) -> bytes:
+    """Undo gzip or deflate compression on a copy of the body, for the log.
 
-    This is for logging only. The bytes relayed to Codex are never touched.
-    A backend may compress its response (gzip), so decompress a copy first.
-    Then store JSON as a real object when it parses, otherwise as text.
+    A backend may compress its response. Codex gets the compressed bytes
+    as they are. Only the log copy is decompressed so it can be read.
     """
-    if not raw:
-        return None
-    encoding = content_encoding.lower().strip()
+    encoding = (content_encoding or "").lower().strip()
     try:
         if encoding == "gzip":
-            raw = gzip.decompress(raw)
-        elif encoding == "deflate":
-            raw = zlib.decompress(raw)
+            return gzip.decompress(raw)
+        if encoding == "deflate":
+            return zlib.decompress(raw)
     except (OSError, zlib.error):
         pass
+    return raw
+
+
+def decode_body_for_log(raw: bytes):
+    """Store JSON as a real object when it parses, otherwise as text."""
+    if not raw:
+        return None
     text = raw.decode("utf-8", errors="replace")
     try:
         return json.loads(text)
@@ -115,7 +130,8 @@ async def forward(
     config: ProbeConfig,
     session: Session,
     client: httpx.AsyncClient,
-) -> Response:
+    pricing: dict,
+):
     """Handle one request from Codex."""
     # Every LLM call is a POST. Other requests (like GET /v1/models) are
     # forwarded too, but are not recorded as LLM calls.
@@ -132,75 +148,109 @@ async def forward(
     timestamp_start = now_iso()
     started = time.perf_counter()
 
-    status = None
-    raw_response = b""
-    response_headers: list[tuple[str, str]] = []
-    error = None
-    try:
-        upstream_request = client.build_request(
-            request.method, url, headers=headers, content=body
+    def elapsed_ms() -> int:
+        return round((time.perf_counter() - started) * 1000)
+
+    def record_call(
+        status: Optional[int],
+        response_headers: dict,
+        raw_response: bytes,
+        first_chunk_ms: Optional[int],
+        error: Optional[str],
+    ) -> None:
+        """Build the log record for this call. Runs after the response ended."""
+        if not is_llm_call:
+            return
+        request_json = decode_body_for_log(
+            decompress_for_log(body, request.headers.get("content-encoding", ""))
         )
-        # stream=True plus aiter_raw() gives us the response bytes exactly as
-        # the backend sent them (still compressed, if it compressed them).
-        upstream = await client.send(upstream_request, stream=True)
-        try:
-            status = upstream.status_code
-            response_headers = list(upstream.headers.items())
-            chunks = [chunk async for chunk in upstream.aiter_raw()]
-            raw_response = b"".join(chunks)
-        finally:
-            await upstream.aclose()
-    except httpx.HTTPError as exc:
-        # The backend could not be reached or the connection broke.
-        error = f"{type(exc).__name__}: {exc}"
+        model = request_json.get("model") if isinstance(request_json, dict) else None
 
-    latency_ms = round((time.perf_counter() - started) * 1000)
+        response_log = None
+        usage = None
+        if status is not None:
+            readable = decompress_for_log(raw_response, response_headers.get("content-encoding", ""))
+            streamed = "text/event-stream" in response_headers.get("content-type", "")
+            # A streamed response is many SSE events. Glue them back together.
+            response_body = reassemble(readable) if streamed else decode_body_for_log(readable)
+            response_log = ResponseLog(status=status, streamed=streamed, body=response_body)
+            usage = extract_usage(response_body)
 
-    if is_llm_call:
-        request_json = decode_body_for_log(body, request.headers.get("content-encoding", ""))
-        content_encoding = dict(
-            (k.lower(), v) for k, v in response_headers
-        ).get("content-encoding", "")
         session.add_call(
-            {
-                "session_id": session.session_id,
-                "call_index": call_index,
-                "timestamp_start": timestamp_start,
-                "latency_ms": latency_ms,
-                "backend": {
-                    "name": config.backend.name,
-                    "base_url": config.backend.base_url,
-                },
-                "model": request_json.get("model") if isinstance(request_json, dict) else None,
-                "path": "/v1/" + path,
-                "request": {
-                    "headers": redact_headers(request.headers.items()),
-                    "body": request_json,
-                },
-                "translated_request": None,
-                "response": None
-                if error
-                else {
-                    "status": status,
-                    "streamed": False,
-                    "body": decode_body_for_log(raw_response, content_encoding),
-                },
-                "usage": None,
-                "cost_usd": None,
-                "error": error,
-            }
+            CallRecord(
+                session_id=session.session_id,
+                call_index=call_index,
+                timestamp_start=timestamp_start,
+                latency_ms=elapsed_ms(),
+                first_chunk_ms=first_chunk_ms,
+                backend=BackendInfo(name=config.backend.name, base_url=config.backend.base_url),
+                model=model,
+                path="/v1/" + path,
+                client_session_id=find_client_session_id(request.headers.items()),
+                request=RequestLog(headers=redact_headers(request.headers.items()), body=request_json),
+                translated_request=None,
+                response=response_log,
+                usage=usage,
+                cost_usd=compute_cost(model, usage, pricing),
+                error=error,
+            )
         )
 
-    if error:
+    try:
+        upstream_request = client.build_request(request.method, url, headers=headers, content=body)
+        # stream=True means: return as soon as the response headers arrive,
+        # and let us read the body piece by piece afterwards.
+        upstream = await client.send(upstream_request, stream=True)
+    except httpx.HTTPError as exc:
+        # The backend could not be reached at all.
+        error = f"{type(exc).__name__}: {exc}"
+        record_call(None, {}, b"", None, error)
         # 502 Bad Gateway is the standard status for "the proxy could not get
         # an answer from the server behind it".
         return JSONResponse(
             status_code=502,
-            content={"error": {"message": f"CodexProbe could not reach the backend: {error}",
-                               "type": "codex_probe_upstream_error"}},
+            content={
+                "error": {
+                    "message": f"CodexProbe could not reach the backend: {error}",
+                    "type": "codex_probe_upstream_error",
+                }
+            },
         )
 
-    relay_headers = {
-        k: v for k, v in response_headers if k.lower() not in SKIP_RESPONSE_HEADERS
-    }
-    return Response(content=raw_response, status_code=status, headers=relay_headers)
+    response_headers = {k.lower(): v for k, v in upstream.headers.items()}
+
+    async def relay():
+        """Pass response bytes to Codex as they arrive, keeping a copy.
+
+        This is an async generator. Each `yield chunk` hands one piece to the
+        web server, which sends it to Codex immediately. The function then
+        pauses until the backend produces the next piece. Nothing is held
+        back, so Codex sees tokens appear at the same pace as without the
+        proxy. The copy in `chunks` is only used after the stream ends.
+        """
+        chunks: list[bytes] = []
+        first_chunk_ms = None
+        error = None
+        try:
+            # aiter_raw() gives the bytes exactly as the backend sent them
+            # (still compressed, if the backend compressed them).
+            async for chunk in upstream.aiter_raw():
+                if first_chunk_ms is None:
+                    first_chunk_ms = elapsed_ms()
+                chunks.append(chunk)
+                yield chunk
+        except httpx.HTTPError as exc:
+            error = f"Stream from backend broke: {type(exc).__name__}: {exc}"
+            raise
+        except BaseException:
+            # Raised into the generator when Codex hangs up early.
+            error = "Client disconnected before the response finished"
+            raise
+        finally:
+            # Runs on normal end, on error, and on disconnect, so every call
+            # gets logged, with whatever part of the response was received.
+            record_call(upstream.status_code, response_headers, b"".join(chunks), first_chunk_ms, error)
+            await upstream.aclose()
+
+    relay_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in HOP_BY_HOP}
+    return StreamingResponse(relay(), status_code=upstream.status_code, headers=relay_headers)

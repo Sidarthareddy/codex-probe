@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from .config import load_config
 from .logger import Session
+from .pricing import load_pricing
 from .server import create_app
 
 
@@ -62,13 +63,16 @@ class ProxyRecorder:
         self.config = load_config(config)
         self.session: Session | None = None
         self._server: BackgroundServer | None = None
+        # Filled in by stop(): totals for the session that just ended.
+        self.summary: dict | None = None
 
     def start(self) -> str:
         """Start the proxy and return the endpoint to give to Codex."""
         if self._server is not None:
             raise RuntimeError("Recorder is already running")
-        self.session = Session()
-        app = create_app(self.config, self.session)
+        self.session = Session(self.config.log_dir)
+        pricing = load_pricing(self.config.pricing_file)
+        app = create_app(self.config, self.session, pricing)
         self._server = BackgroundServer(app, self.config.listen_host, self.config.listen_port)
         self._server.start()
         return f"http://{self._server.host}:{self._server.port}/v1"
@@ -79,4 +83,6 @@ class ProxyRecorder:
             raise RuntimeError("Recorder is not running")
         self._server.stop()
         self._server = None
+        # Also saved to logs/<session_id>.summary.json
+        self.summary = self.session.write_summary()
         return self.session.snapshot()

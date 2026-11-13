@@ -16,7 +16,7 @@ from .forwarder import forward
 from .logger import Session
 
 
-def create_app(config: ProbeConfig, session: Session) -> FastAPI:
+def create_app(config: ProbeConfig, session: Session, pricing: dict) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # One shared HTTP client for the life of the server. Reusing it keeps
@@ -34,6 +34,6 @@ def create_app(config: ProbeConfig, session: Session) -> FastAPI:
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
     )
     async def proxy(path: str, request: Request):
-        return await forward(request, path, config, session, app.state.client)
+        return await forward(request, path, config, session, app.state.client, pricing)
 
     return app

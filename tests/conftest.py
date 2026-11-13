@@ -22,7 +22,7 @@ def make_recorder(backend, tmp_path):
     """
     recorders = []
 
-    def _make(api_key_env=None, wire_api="responses"):
+    def _make(api_key_env=None, wire_api="responses", pricing_file="pricing.json"):
         recorder = ProxyRecorder(
             {
                 "listen_host": "127.0.0.1",
@@ -34,6 +34,7 @@ def make_recorder(backend, tmp_path):
                     "api_key_env": api_key_env,
                 },
                 "log_dir": str(tmp_path / "logs"),
+                "pricing_file": str(pricing_file),
             }
         )
         recorders.append(recorder)
