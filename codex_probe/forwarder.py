@@ -35,7 +35,7 @@ from .logger import (
     redact_headers,
 )
 from .pricing import compute_cost
-from .reassembly import reassemble
+from .reassembly import reassemble, stream_is_complete
 from .usage import extract_usage
 
 # "Hop by hop" headers describe one single network connection (for example
@@ -56,6 +56,9 @@ HOP_BY_HOP = {
 #   host           -> must name the backend, not the proxy. httpx sets it.
 #   content-length -> httpx recomputes it from the body (same value).
 SKIP_REQUEST_HEADERS = HOP_BY_HOP | {"host", "content-length"}
+
+
+CLIENT_DISCONNECTED = "Client disconnected before the response finished"
 
 
 def build_upstream_headers(incoming, config: ProbeConfig) -> list[tuple[str, str]]:
@@ -174,6 +177,11 @@ async def forward(
             # A streamed response is many SSE events. Glue them back together.
             response_body = reassemble(readable) if streamed else decode_body_for_log(readable)
             response_log = ResponseLog(status=status, streamed=streamed, body=response_body)
+            # Codex closes the connection as soon as it has read the final
+            # event, often before the backend has closed its side. That is a
+            # normal end, not a failure, so it is not logged as an error.
+            if error == CLIENT_DISCONNECTED and streamed and stream_is_complete(readable):
+                error = None
             usage = extract_usage(response_body)
 
         session.add_call(
@@ -244,7 +252,7 @@ async def forward(
             raise
         except BaseException:
             # Raised into the generator when Codex hangs up early.
-            error = "Client disconnected before the response finished"
+            error = CLIENT_DISCONNECTED
             raise
         finally:
             # Runs on normal end, on error, and on disconnect, so every call

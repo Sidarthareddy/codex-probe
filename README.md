@@ -24,9 +24,9 @@ It does three things:
 
 | Part | State |
 |------|-------|
-| Proxy, streaming relay, logging, usage and cost | Done, 52 tests against a mock backend |
+| Proxy, streaming relay, logging, usage and cost | Done, 54 tests against a mock backend |
 | Real run through local Qwen (Ollama) | Done. Calls reach Qwen and are fully logged. Codex does **not** complete the task, see [Qwen findings](#qwen-findings) |
-| Real run through OpenAI | Not run yet. `pricing.json` has no OpenAI prices yet |
+| Real run through OpenAI (`gpt-5.4-mini`) | Done. Codex completes the task in 5 calls for about $0.015 |
 
 ## Install
 
@@ -43,6 +43,8 @@ For real runs you also need:
 
 * **Codex CLI** (tested with 0.169.0): https://github.com/openai/codex
 * **Ollama** (tested with 0.40.16) for the local model: https://ollama.com
+* For the OpenAI run, a `.env` file in the project folder with `OPENAI_API_KEY=...`
+  (the file is ignored by git)
 
 ## Usage
 
@@ -63,6 +65,7 @@ Or let the quickstart script do all of it (start the recorder, write the
 Codex config, run Codex on a small demo task, print the summary):
 
 ```bash
+python examples/quickstart.py --config examples/config.openai.json --model gpt-5.4-mini
 python examples/quickstart.py --config examples/config.qwen.json --model qwen2.5-coder:7b
 ```
 
@@ -147,7 +150,8 @@ so no format translation is needed.
 
 Each line of `logs/<session_id>.jsonl` is one LLM call. This is a real one
 from the Qwen run, with the long parts shortened here (the log itself is
-never shortened). The full file is in `docs/sample_session/`.
+never shortened). The full file is in `docs/sample_session/`, next to the
+five call OpenAI session.
 
 ```json
 {
@@ -224,6 +228,25 @@ stopped, for two reasons the logs make visible:
 
 The evidence and numbers are in [docs/WRITEUP.md](docs/WRITEUP.md).
 
+## OpenAI vs Qwen in short
+
+Same task, same Codex config apart from the model name:
+
+| | OpenAI `gpt-5.4-mini` | Qwen `qwen2.5-coder:7b` |
+|---|---:|---:|
+| Task completed | yes | no |
+| LLM calls | 5 | 1 |
+| Input tokens (cached) | 60,998 (48,256) | 4,008 (0) |
+| Output tokens | 489 | 23 |
+| API cost | $0.0154 | $0 |
+| Time spent in LLM calls | 8.1 s | 7.8 s |
+
+The OpenAI session also shows the agent loop clearly: input grows from
+11,873 to 12,578 tokens over five calls because the full history is resent
+each time, and prompt caching cuts the session cost by 68%. The call by
+call table is in the write-up, and both session logs are in
+`docs/sample_session/`.
+
 ## Tests
 
 ```bash
@@ -260,7 +283,6 @@ pricing.json      prices in USD per 1M tokens, keyed by model
 
 ## Not done yet
 
-* The OpenAI run and the OpenAI vs Qwen comparison.
 * Optional: a compatibility adapter that renames `developer` to `system` and
   turns Qwen's text tool calls into real ones, so Codex can finish a task
   on the local model.

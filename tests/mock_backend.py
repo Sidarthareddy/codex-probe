@@ -133,6 +133,10 @@ class MockBackend:
         # events. Tests use it to prove the proxy relays chunks live.
         self.gate = threading.Event()
         self.gate.set()
+        # While this is closed, a stream stays open after its last event,
+        # like a backend that is slow to close the connection.
+        self.may_close = threading.Event()
+        self.may_close.set()
         # Set to False to make streams leave out usage data.
         self.include_usage = True
 
@@ -159,6 +163,8 @@ class MockBackend:
                         while not self.gate.is_set():
                             await asyncio.sleep(0.01)
                     yield event
+                while not self.may_close.is_set():
+                    await asyncio.sleep(0.01)
 
             return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -198,5 +204,6 @@ class MockBackend:
 
     def stop(self) -> None:
         self.gate.set()
+        self.may_close.set()
         if self._server:
             self._server.stop()

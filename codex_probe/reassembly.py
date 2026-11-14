@@ -187,3 +187,22 @@ def reassemble(raw: bytes) -> dict:
             return reassemble_chat(events)
     # Unknown format: keep every event so nothing is lost.
     return {"events": events}
+
+
+def stream_is_complete(raw: bytes) -> bool:
+    """True if the stream contains its final event.
+
+    Responses API streams end with response.completed (or .incomplete or
+    .failed). Chat Completions streams end with the "[DONE]" marker.
+    """
+    for event in parse_sse(raw):
+        data = event["data"]
+        if data == "[DONE]":
+            return True
+        if isinstance(data, dict) and data.get("type") in (
+            "response.completed",
+            "response.incomplete",
+            "response.failed",
+        ):
+            return True
+    return False

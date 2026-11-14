@@ -4,7 +4,13 @@ import json
 
 import httpx
 
-from codex_probe.reassembly import parse_sse, reassemble, reassemble_chat, reassemble_responses
+from codex_probe.reassembly import (
+    parse_sse,
+    reassemble,
+    reassemble_chat,
+    reassemble_responses,
+    stream_is_complete,
+)
 from tests.mock_backend import (
     CHAT_USAGE,
     MESSAGE_ITEM,
@@ -99,6 +105,28 @@ def test_client_disconnect_mid_stream_is_still_logged(backend, make_recorder):
     assert calls[0]["response"]["body"]["output"][0]["type"] == "message"
 
 
+def test_client_closing_after_the_final_event_is_not_an_error(backend, make_recorder):
+    """Codex hangs up right after response.completed, while the backend
+    still holds the connection open. The call is complete, so no error."""
+    backend.may_close.clear()  # backend keeps the stream open after the last event
+    recorder = make_recorder()
+    endpoint = recorder.start()
+    received = b""
+    with httpx.stream(
+        "POST", endpoint + "/responses", content=STREAM_REQUEST, headers=HEADERS, timeout=5
+    ) as response:
+        for chunk in response.iter_raw():
+            received += chunk
+            if b"response.completed" in received:
+                break  # close early, like Codex does
+    backend.may_close.set()
+    calls = recorder.stop()
+
+    assert calls[0]["error"] is None
+    assert calls[0]["response"]["body"]["output"] == [MESSAGE_ITEM, TOOL_ITEM]
+    assert calls[0]["usage"]["input_tokens"] == 1200
+
+
 # --- reassembly unit tests ---------------------------------------------------
 
 
@@ -161,3 +189,12 @@ def test_chat_reassembly_joins_content_tool_calls_and_usage():
 def test_unknown_stream_format_keeps_all_events():
     body = reassemble(sse({"something": "else"}))
     assert body == {"events": [{"event": None, "data": {"something": "else"}}]}
+
+
+def test_stream_is_complete_detects_the_final_event():
+    full = b"".join(responses_stream_events())
+    cut = b"".join(responses_stream_events()[:-1])
+    assert stream_is_complete(full) is True
+    assert stream_is_complete(cut) is False
+    assert stream_is_complete(b"".join(chat_stream_events())) is True
+    assert stream_is_complete(b"".join(chat_stream_events()[:-1])) is False
