@@ -2,9 +2,34 @@
 
 LLM call recorder, cost tracker, and backend swap for the OpenAI Codex CLI.
 
-When you give Codex a task it runs a hidden loop of LLM calls. CodexProbe is
-a small local reverse proxy that sits between Codex and its real LLM backend
-and makes that loop visible:
+## Problem
+
+Coding agents like Codex CLI look like they do one thing when you ask them something, but behind the scenes they run a loop of many LLM calls you never see. When an agent behaves strangely, stalls, or costs more than expected, there is no way to inspect the exact requests and responses that produced it.
+
+CodexProbe is a streaming reverse proxy that sits between Codex and its model. It records every call in full, including the system prompt, the running conversation, the tool definitions and the model's replies, while relaying the stream live so the agent's behavior is unchanged. It also tracks tokens and cost per call, and lets you point the same agent at a locally hosted open model by changing config alone.
+
+## Results: OpenAI vs Qwen
+
+The same small task (add a docstring to every function in `hello.py`) run
+through the recorder against two backends, with the same Codex config apart
+from the model name:
+
+| | OpenAI `gpt-5.4-mini` | Qwen `qwen2.5-coder:7b` |
+|---|---:|---:|
+| Task completed | yes | no |
+| LLM calls | 5 | 1 |
+| Input tokens (cached) | 60,998 (48,256) | 4,008 (0) |
+| Output tokens | 489 | 23 |
+| API cost | $0.0154 | $0 |
+| Time spent in LLM calls | 8.1 s | 7.8 s |
+
+The OpenAI session also shows the agent loop clearly: input grows from
+11,873 to 12,578 tokens over five calls because the full history is resent
+each time, and prompt caching cuts the session cost by 68%. The call by
+call table is in the write-up, and both session logs are in
+`docs/sample_session/`.
+
+## How it works
 
 ```
 Codex CLI  ->  CodexProbe (http://127.0.0.1:8135/v1)  ->  real backend (OpenAI, or local Qwen via Ollama)
@@ -227,25 +252,6 @@ stopped, for two reasons the logs make visible:
    treats it as a final answer and ends the loop.
 
 The evidence and numbers are in [docs/WRITEUP.md](docs/WRITEUP.md).
-
-## OpenAI vs Qwen in short
-
-Same task, same Codex config apart from the model name:
-
-| | OpenAI `gpt-5.4-mini` | Qwen `qwen2.5-coder:7b` |
-|---|---:|---:|
-| Task completed | yes | no |
-| LLM calls | 5 | 1 |
-| Input tokens (cached) | 60,998 (48,256) | 4,008 (0) |
-| Output tokens | 489 | 23 |
-| API cost | $0.0154 | $0 |
-| Time spent in LLM calls | 8.1 s | 7.8 s |
-
-The OpenAI session also shows the agent loop clearly: input grows from
-11,873 to 12,578 tokens over five calls because the full history is resent
-each time, and prompt caching cuts the session cost by 68%. The call by
-call table is in the write-up, and both session logs are in
-`docs/sample_session/`.
 
 ## Tests
 
