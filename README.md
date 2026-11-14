@@ -277,7 +277,7 @@ codex_probe/
   logger.py       log schema, header redaction, JSONL file, session summary
 examples/         quickstart.py and the two backend configs
 tests/            mock backend and tests
-docs/             SPEC.md, WRITEUP.md, sample_session/
+docs/             WRITEUP.md, sample_session/
 pricing.json      prices in USD per 1M tokens, keyed by model
 ```
 

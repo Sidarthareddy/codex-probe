@@ -13,7 +13,7 @@ OpenAI (`gpt-5.4-mini`) and one against a local Qwen model served by Ollama.
 * On Qwen, Codex did **not** complete the task. It made one LLM call and
   stopped, and `hello.py` was unchanged. The logs show two causes: Ollama
   drops Codex's `developer` messages, and Qwen writes tool calls as plain
-  text. The spec lists this kind of result as an acceptable finding.
+  text. The task brief accepts this kind of result as a finding.
 
 ## Setup used
 
