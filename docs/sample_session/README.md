@@ -11,6 +11,7 @@ Each `.jsonl` file has one LLM call per line. The matching `.summary.json`
 has the token totals, cost and latency.
 
 These copies were edited after recording: the local username and folder
-paths were replaced with `/path/to/project`. Nothing else was changed. One
+paths were replaced with `/path/to/project`, and the Codex `installation_id`
+was replaced with zeros. Nothing else was changed. One
 side effect is that the logged `content-length` header no longer matches
 the length of the logged request body.
