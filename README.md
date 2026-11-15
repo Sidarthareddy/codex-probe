@@ -58,7 +58,7 @@ It does three things:
 Needs Python 3.11 or newer.
 
 ```bash
-git clone <this repo> && cd codex-probe
+git clone https://github.com/Sidarthareddy/codex-probe.git && cd codex-probe
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
@@ -292,3 +292,7 @@ pricing.json      prices in USD per 1M tokens, keyed by model
 * Optional: a compatibility adapter that renames `developer` to `system` and
   turns Qwen's text tool calls into real ones, so Codex can finish a task
   on the local model.
+* The token count gap: OpenAI counted 11,873 input tokens on the first call
+  while Ollama counted 4,008 for the same request. The dropped `developer`
+  messages account for part of the difference but not all of it, and the
+  rest was not investigated.
